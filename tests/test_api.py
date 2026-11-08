@@ -45,3 +45,5 @@ def test_home_and_runtime_info_are_available():
         assert info.status_code == 200
         assert info.json()["origin_backend"] == "demo"
         assert info.json()["objects"] == ["alpha"]
+        assert client.get("/catalog").status_code == 200
+        assert client.get("/metrics-ui").status_code == 200

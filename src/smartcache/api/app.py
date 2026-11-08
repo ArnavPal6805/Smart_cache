@@ -111,8 +111,8 @@ a,button {{ color:#fff; background:#1d4f87; border:1px solid #3479c7; border-rad
 <div class="card"><h2>Open</h2>
 <a href="/explorer">Simulation Explorer</a>
 <a href="/docs">API documentation</a>
-<a href="/objects">Object catalog</a>
-<a href="/metrics">Live metrics</a></div>
+<a href="/catalog">Object catalog</a>
+<a href="/metrics-ui">Live metrics</a></div>
 <div class="card"><h2>Try a request</h2>
 <p class="muted">Requesting the same object twice demonstrates MISS then HIT.</p>
 <code>curl -i /objects/aggregation</code>
@@ -125,6 +125,37 @@ a,button {{ color:#fff; background:#1d4f87; border:1px solid #3479c7; border-rad
     @app.get("/objects")
     def objects():
         return {"objects": sorted(effective_origin_specs)}
+
+    @app.get("/catalog", response_class=HTMLResponse)
+    def catalog():
+        rows = []
+        for key in sorted(effective_origin_specs):
+            spec = effective_origin_specs[key]
+            rows.append(
+                f"<tr><td><a href='/objects/{key}'>{key}</a></td>"
+                f"<td>{spec.retrieval_cost_ms:.3f} ms</td>"
+                f"<td>{spec.size_bytes:,} bytes</td>"
+                f"<td><a href='/objects/{key}'>Request object</a></td></tr>"
+            )
+        return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmartCache Object Catalog</title>
+<style>
+body {{ margin:0; background:#0e1624; color:#eef4ff; font:15px system-ui,sans-serif; }}
+main {{ max-width:1000px; margin:auto; padding:32px 20px; }}
+.panel {{ background:#172235; border:1px solid #2b3b55; border-radius:12px; padding:20px; }}
+a {{ color:#9bd1ff; }} table {{ width:100%; border-collapse:collapse; }}
+th,td {{ padding:12px; text-align:left; border-bottom:1px solid #2b3b55; }}
+th {{ color:#9dafc8; }} .nav a {{ display:inline-block; margin-right:16px; }}
+</style></head><body><main>
+<p class="nav"><a href="/">Home</a><a href="/explorer">Explorer</a><a href="/metrics-ui">Live metrics</a></p>
+<h1>Object catalog</h1>
+<p>Origin: <strong>{'SQLite' if use_sqlite else 'Demo simulator'}</strong>.
+Click an object to issue a real cache request.</p>
+<section class="panel"><table><tr><th>Object</th><th>Profiled retrieval cost</th><th>Profiled size</th><th>Action</th></tr>
+{''.join(rows)}</table></section>
+<p><a href="/objects">JSON API: /objects</a></p>
+</main></body></html>"""
 
     @app.get("/runtime-info")
     def runtime_info():
@@ -153,6 +184,44 @@ a,button {{ color:#fff; background:#1d4f87; border:1px solid #3479c7; border-rad
     @app.get("/metrics")
     def metrics():
         return app.state.cache.snapshot_metrics()
+
+    @app.get("/metrics-ui", response_class=HTMLResponse)
+    def metrics_ui():
+        return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmartCache Live Metrics</title>
+<style>
+body { margin:0; background:#0e1624; color:#eef4ff; font:15px system-ui,sans-serif; }
+main { max-width:1000px; margin:auto; padding:32px 20px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+.card { background:#172235; border:1px solid #2b3b55; border-radius:12px; padding:18px; }
+.value { font-size:26px; font-weight:700; color:#9bd1ff; margin-top:8px; }
+a { color:#9bd1ff; } .muted { color:#9dafc8; }
+</style></head><body><main>
+<p><a href="/">Home</a> · <a href="/catalog">Object catalog</a> · <a href="/explorer">Explorer</a></p>
+<h1>Live metrics</h1><p class="muted">Refreshes every 1 second. JSON API: <a href="/metrics">/metrics</a></p>
+<div id="status" class="muted">Loading...</div><div id="metrics" class="grid"></div>
+<script>
+const fields = [
+  ['requests','Requests'],['hits','Hits'],['misses','Misses'],['bypasses','Bypasses'],
+  ['evictions','Evictions'],['policy_time_ms','Policy time (ms)'],
+  ['backend_latency_ms','Backend time (ms)'],['used_bytes','Used bytes'],['objects','Objects']
+];
+async function refresh() {
+  try {
+    const response = await fetch('/metrics', {cache:'no-store'});
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    document.getElementById('metrics').innerHTML = fields.map(([key,label]) =>
+      `<div class="card"><div class="muted">${label}</div><div class="value">${Number(data[key] ?? 0).toLocaleString(undefined,{maximumFractionDigits:3})}</div></div>`
+    ).join('');
+    document.getElementById('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (error) {
+    document.getElementById('status').textContent = 'Unable to load metrics: ' + error.message;
+  }
+}
+refresh(); setInterval(refresh, 1000);
+</script></main></body></html>"""
 
     @app.get("/simulation")
     def simulation(
