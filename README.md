@@ -41,6 +41,16 @@ Implemented:
 - Versioned checkpoint registry with SHA-256 promotion and rollback
 - Docker image definition
 
+The core completion checklist is verified in
+[`runtime-validation-report.md`](runtime-validation-report.md):
+
+- 19 automated tests pass.
+- Byte-aware evaluation uses 30 independent test seeds (`30000-30029`).
+- SQLite origin and Redis-backed API requests are verified.
+- Two API workers share Redis state, including cross-worker MISS -> HIT behavior.
+- Redis outage/recovery and checkpoint rollback after restart are verified.
+- HTTP load tests cover concurrency 1, 10, 50, and 100 with zero request errors.
+
 The byte-aware DQN is a separate model from the fixed-slot DQN. Their state
 and action dimensions are different, so checkpoints must not be mixed.
 
@@ -117,6 +127,7 @@ smart-cache-rl/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .dockerignore
+├── runtime-validation-report.md      # final checklist evidence
 └── pyproject.toml
 ```
 
@@ -325,6 +336,19 @@ Do not compare absolute miss costs from the fixed-slot and byte-capacity
 benchmarks directly. They use different constraints and therefore represent
 different experiments.
 
+The final independent test run reported these DQN-Byte miss-cost reductions:
+
+| Workload | Baseline | Reduction | 95% paired bootstrap CI | Wins |
+|---|---|---:|---:|---:|
+| Stationary | LRU | 2.16% | 1.30%-2.98% | 25/30 |
+| Stationary | LFU | 2.74% | 1.82%-3.64% | 26/30 |
+| Stationary | CostAware | 3.12% | 2.28%-3.95% | 26/30 |
+| Drifting | LRU | 9.22% | 8.75%-9.70% | 30/30 |
+| Drifting | LFU | 25.53% | 24.94%-26.08% | 30/30 |
+| Drifting | CostAware | 6.95% | 6.00%-7.84% | 29/30 |
+
+These held-out test results were not used for checkpoint selection.
+
 ## Results recorded in this project
 
 ### Fixed-slot DQN
@@ -506,6 +530,20 @@ Repeat with concurrency `1`, `10`, `50`, and `100`. The report records
 completed responses, transport errors, error rate, throughput, p50, p95, p99,
 HTTP status counts, and cache result headers.
 
+The final SQLite-origin and Redis-cache run used 500 requests at each level.
+Every level returned 500 HTTP 200 responses with zero errors:
+
+| Concurrency | Throughput | p50 | p95 | p99 |
+|---:|---:|---:|---:|---:|
+| 1 | 127.03 req/s | 6.88 ms | 12.05 ms | 16.23 ms |
+| 10 | 171.91 req/s | 8.86 ms | 311.04 ms | 520.72 ms |
+| 50 | 245.71 req/s | 31.42 ms | 745.08 ms | 1261.50 ms |
+| 100 | 227.38 req/s | 188.12 ms | 892.90 ms | 1427.43 ms |
+
+Raw reports are stored as `artifacts/http_load_1.json`,
+`artifacts/http_load_10.json`, `artifacts/http_load_50.json`, and
+`artifacts/http_load_100.json`.
+
 ## Checkpoint registry
 
 The registry keeps versioned checkpoint copies, SHA-256 hashes, and an atomic
@@ -559,6 +597,19 @@ using port 8000. Verify from another terminal:
 curl http://127.0.0.1:8001/health
 curl http://127.0.0.1:8001/metrics
 ```
+
+The Docker Compose configuration and Redis service were validated. A
+standalone application-image build/run and container health probe should be
+run before treating the image itself as verified.
+
+## Final validation status
+
+The complete evidence report is in
+[`runtime-validation-report.md`](runtime-validation-report.md). The core
+checklist is complete. Browser rendering remains unverified because Playwright
+browser installation requires interactive `sudo` access in the validation
+environment. The project intentionally remains on the `byte_cache_v2` feature
+schema; `byte_cache_v3` is not implemented or claimed.
 
 ## How the comparison should be interpreted
 
