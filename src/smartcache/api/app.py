@@ -36,6 +36,7 @@ def create_app(
     cost_scale_ms: float | None = None,
     size_scale_bytes: float | None = None,
     origin_backend: str | None = None,
+    cache_backend: str | None = None,
 ) -> FastAPI:
     use_sqlite = (
         (origin_backend or os.getenv("ORIGIN_BACKEND", "demo")).lower() == "sqlite"
@@ -63,7 +64,7 @@ def create_app(
         "cost_scale_ms": cost_scale_ms or 250.0,
         "size_scale_bytes": size_scale_bytes or 32768.0,
     }
-    cache_backend = os.getenv("CACHE_BACKEND", "memory").lower()
+    cache_backend = (cache_backend or os.getenv("CACHE_BACKEND", "memory")).lower()
     if cache_backend not in {"memory", "redis"}:
         raise ValueError("CACHE_BACKEND must be memory or redis")
 

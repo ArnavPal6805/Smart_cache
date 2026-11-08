@@ -19,6 +19,7 @@ def test_first_request_misses_and_second_hits():
         origin_loader=loader,
         capacity_bytes=100,
         max_objects=4,
+        cache_backend="memory",
     )
     with TestClient(app) as client:
         first = client.get("/objects/alpha")
@@ -38,6 +39,7 @@ def test_home_and_runtime_info_are_available():
         origin_loader=lambda key: b"A" * 10,
         capacity_bytes=100,
         max_objects=4,
+        cache_backend="memory",
     )
     with TestClient(app) as client:
         assert client.get("/").status_code == 200
@@ -59,6 +61,7 @@ def test_origin_failure_is_returned_and_not_cached():
         ),
         capacity_bytes=100,
         max_objects=4,
+        cache_backend="memory",
     )
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.get("/objects/broken")
