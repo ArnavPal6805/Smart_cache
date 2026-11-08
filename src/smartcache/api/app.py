@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from fastapi.responses import HTMLResponse
 
 from smartcache.api.demo_origin import ORIGIN_SPECS, OriginSpec, load_origin_payload
+from smartcache.api.sqlite_origin import SQLiteOrigin
 from smartcache.policies.cost_aware import CostAwarePolicy
 from smartcache.policies.dqn_byte_policy import DQNBytePolicy
 from smartcache.policies.lfu import LFUPolicy
@@ -29,6 +30,20 @@ def create_app(
     cost_scale_ms: float | None = None,
     size_scale_bytes: float | None = None,
 ) -> FastAPI:
+    use_sqlite = os.getenv("ORIGIN_BACKEND", "demo").lower() == "sqlite"
+    sqlite_origin = (
+        SQLiteOrigin(os.getenv("SQLITE_DATABASE", "data/origin.sqlite"))
+        if use_sqlite
+        else None
+    )
+    effective_origin_specs = (
+        sqlite_origin.specs_from_profile(os.getenv("ORIGIN_PROFILE"))
+        if sqlite_origin is not None
+        else origin_specs
+    )
+    effective_origin_loader = (
+        sqlite_origin.loader() if sqlite_origin is not None else origin_loader
+    )
     settings = {
         "capacity_bytes": capacity_bytes or int(os.getenv("CACHE_CAPACITY_BYTES", "24576")),
         "max_objects": max_objects or int(os.getenv("CACHE_MAX_OBJECTS", "16")),
@@ -65,8 +80,8 @@ def create_app(
     async def lifespan(app: FastAPI):
         app.state.cache = ByteCacheRuntime(
             policy=build_policy(),
-            origin_specs=origin_specs,
-            origin_loader=origin_loader,
+            origin_specs=effective_origin_specs,
+            origin_loader=effective_origin_loader,
             **settings,
         )
         yield
@@ -79,11 +94,11 @@ def create_app(
 
     @app.get("/objects")
     def objects():
-        return {"objects": sorted(origin_specs)}
+        return {"objects": sorted(effective_origin_specs)}
 
     @app.get("/objects/{key}")
     def get_object(key: str):
-        if key not in origin_specs:
+        if key not in effective_origin_specs:
             raise HTTPException(status_code=404, detail=f"Unknown object: {key}")
         result = app.state.cache.get(key)
         headers = {

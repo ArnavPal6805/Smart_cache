@@ -52,6 +52,8 @@ smart-cache-rl/
 │   ├── generalization_results.csv     # fixed-slot multi-seed results
 │   └── byte_generalization_results.csv # byte-capacity multi-seed results
 ├── scripts/
+│   ├── init_demo_db.py                 # SQLite origin database generator
+│   ├── profile_sqlite_origin.py        # measured SQL latency/size profile
 │   ├── test_environment.py             # fixed-slot smoke test
 │   ├── benchmark.py                    # fixed-slot baseline benchmark
 │   ├── benchmark_rl.py                 # fixed-slot DQN benchmark
@@ -66,6 +68,7 @@ smart-cache-rl/
 │   ├── api/
 │   │   ├── app.py                     # FastAPI application
 │   │   ├── demo_origin.py             # deterministic simulated backend
+│   │   ├── sqlite_origin.py           # read-only SQLite origin adapter
 │   │   ├── simulation.py              # replay/comparison API
 │   │   └── simulation.html            # browser Simulation Explorer
 │   ├── core/
@@ -111,7 +114,41 @@ python -m pip install -e ".[dev]"
 ```
 
 The package dependencies include NumPy, PyTorch, Gymnasium, pandas, PyYAML,
-FastAPI, Uvicorn, pytest, and HTTPX.
+FastAPI, Uvicorn, Redis, pytest, and HTTPX.
+
+## Real SQLite origin
+
+The default API still uses the deterministic simulated origin. To create a
+real local SQLite origin and measure actual SQL execution time and serialized
+response sizes, run:
+
+```bash
+python scripts/init_demo_db.py
+python scripts/profile_sqlite_origin.py \
+    --database data/origin.sqlite \
+    --repeats 15
+```
+
+The database contains deterministic synthetic products and purchases. The
+adapter executes real read-only SQL for metadata, user profiles, API rows,
+aggregations, embeddings, reports, and a search index. This is a local
+integration demonstration, not a production database benchmark.
+
+Use the SQLite origin with the API:
+
+```bash
+export ORIGIN_BACKEND=sqlite
+export SQLITE_DATABASE=data/origin.sqlite
+export ORIGIN_PROFILE=configs/sqlite_profile.json
+export CACHE_POLICY=lru
+
+uvicorn smartcache.api.app:app \
+    --host 127.0.0.1 \
+    --port 8000
+```
+
+The profile supplies the DQN/cache cost and size estimates while every miss
+still measures the actual SQLite load duration.
 
 ## Run the tests and smoke checks
 
@@ -383,7 +420,9 @@ The strongest evidence comes from:
 ## Limitations and next steps
 
 - The demonstration origin backend uses simulated latency, not a real database
-  or production service.
+-  or production service unless `ORIGIN_BACKEND=sqlite` is selected.
+- The SQLite origin is a deterministic local workload and is not evidence of
+  production database performance.
 - The state representation is a compact summary and does not contain the full
   request history.
 - The byte-aware DQN requires further multi-seed validation before deployment
