@@ -4,5 +4,5 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .DS_Store
-data/origin.sqlite
+data/
 configs/*.json
