@@ -67,3 +67,22 @@ def test_origin_failure_is_returned_and_not_cached():
         response = client.get("/objects/broken")
         assert response.status_code == 500
         assert app.state.cache.snapshot_metrics()["objects"] == 0
+
+
+def test_invalid_checkpoint_uses_explicit_fallback(monkeypatch):
+    monkeypatch.setenv("CACHE_POLICY", "dqn-byte")
+    monkeypatch.setenv("CACHE_CHECKPOINT", "/tmp/does-not-exist.pt")
+    monkeypatch.setenv("CACHE_FALLBACK_POLICY", "lru")
+    app = create_app(
+        origin_specs={"alpha": OriginSpec(2.0, 10, ord("A"))},
+        origin_loader=lambda key: b"A" * 10,
+        cache_backend="memory",
+        capacity_bytes=100,
+        max_objects=4,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/objects/alpha")
+
+    assert response.status_code == 200
+    assert app.state.cache.policy.name == "LRU"

@@ -1,5 +1,6 @@
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -81,3 +82,23 @@ def test_origin_failure_is_not_cached(cache):
 
     assert cache.keys() == []
     assert cache.stats()["used_bytes"] == 0
+
+
+def test_concurrent_runtime_instances_share_one_admission(cache):
+    specs = {"alpha": OriginSpec(2.0, 5, ord("A"))}
+    calls = []
+
+    def loader(key):
+        calls.append(key)
+        return b"alpha"
+
+    runtimes = [
+        RedisByteCacheRuntime(cache, LRUPolicy(), specs, loader, capacity_bytes=100)
+        for _ in range(2)
+    ]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda runtime: runtime.get("alpha"), runtimes))
+
+    assert all(result.payload == b"alpha" for result in results)
+    assert cache.stats()["object_count"] == 1
+    assert cache.stats()["used_bytes"] == 5

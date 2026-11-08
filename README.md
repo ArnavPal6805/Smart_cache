@@ -316,6 +316,11 @@ The evaluator reports mean and standard deviation, paired bootstrap 95%
 confidence intervals, per-seed win counts for miss cost and net cost, policy
 overhead, hit ratio, evictions, peak bytes, and budget-violation flags.
 
+The byte-DQN training script uses episode seeds beginning at the configured
+training seed (default `42`) and validation seeds offset by `100000` and
+`200000`. Reserve the independent test range beginning at `30000` for final
+evaluation, and do not use those results to select a checkpoint.
+
 Do not compare absolute miss costs from the fixed-slot and byte-capacity
 benchmarks directly. They use different constraints and therefore represent
 different experiments.
