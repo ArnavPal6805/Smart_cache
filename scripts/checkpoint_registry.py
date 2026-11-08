@@ -69,7 +69,7 @@ def promote(source: Path, model_type: str) -> None:
         raise FileNotFoundError(source)
     checkpoint_info = validate_checkpoint(source, model_type)
     digest = sha256(source)
-    version = f"{model_type}-{time.strftime('%Y%m%d-%H%M%S')}-{digest[:12]}"
+    version = f"{model_type}-{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}-{digest[:12]}"
     destination = REGISTRY / version / source.name
     destination.parent.mkdir(parents=True, exist_ok=False)
     shutil.copy2(source, destination)
