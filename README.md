@@ -460,19 +460,3 @@ The strongest evidence comes from:
 4. confidence intervals for paired reductions;
 5. inference overhead that is small relative to latency saved;
 6. byte-budget invariants that are never violated.
-
-## Limitations and next steps
-
-- The default demonstration origin uses simulated latency; select
-  `ORIGIN_BACKEND=sqlite` for the real local SQL path.
-- The SQLite origin is a deterministic local workload and is not evidence of
-  production database performance.
-- The state representation is a compact summary and does not contain the full
-  request history.
-- The byte-aware DQN requires further multi-seed validation before deployment
-  claims are made.
-- The API cache is in-memory; multiple workers would have independent caches.
-- Production evaluation should measure p50/p95 latency, throughput,
-  concurrency, memory use, loader failures, and checkpoint rollback behavior.
-- A production integration should replace `load_origin_payload()` with a real
-  backend adapter.
