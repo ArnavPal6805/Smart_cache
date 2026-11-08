@@ -32,6 +32,7 @@
 <main>
   <h1>SmartCache Simulation Explorer</h1>
   <div class="subtle">Replay the same request stream through every policy and inspect each hit, miss, eviction, reward, and cost.</div>
+  <div id="runtime" class="subtle" style="margin-top:8px">Loading runtime information...</div>
   <div class="controls">
     <label>Scenario<select id="scenario"><option value="stationary">Stationary</option><option value="drifting">Drifting</option></select></label>
     <label>Seed<input id="seed" type="number" value="2026"></label>
@@ -62,7 +63,7 @@ async function load() {
 function currentRows() { return data.policies.map(p => ({policy: p.policy, step: p.steps[index]})); }
 function render() {
   const rows = currentRows(), reference = rows[0].step, req = reference.request;
-  $('request').innerHTML = `<strong>Request ${index + 1} / ${data.requests.length}: ${esc(req.key)}</strong><span>${req.cost} ms retrieval cost</span><span>${req.size} bytes</span>`;
+  $('request').innerHTML = `<strong>Request ${index + 1} / ${data.requests.length}: ${esc(req.key)}</strong><span>${req.cost} ms retrieval cost</span><span>${req.size} bytes</span><span class="subtle">Replay trace</span>`;
   const dqn = rows.find(r => r.policy === 'DQN');
   const focus = dqn || rows[0];
   $('explanation').innerHTML = `<span class="badge ${focus.step.result === 'HIT' ? 'hit' : 'miss'}">${focus.step.result}</span> ${esc(focus.step.explanation)}<br><small>Reward: ${focus.step.reward.toFixed(1)} | Policy time: ${focus.step.policy_time_ms.toFixed(3)} ms</small>`;
@@ -74,6 +75,9 @@ function render() {
 function move(delta) { if (!data) return; index = Math.max(0, Math.min(data.requests.length - 1, index + delta)); render(); }
 $('load').onclick = load; $('prev').onclick = () => move(-1); $('next').onclick = () => move(1);
 $('play').onclick = () => { if (timer) { clearInterval(timer); timer = null; $('play').textContent = 'Play'; } else { $('play').textContent = 'Pause'; timer = setInterval(() => { if (index >= data.requests.length - 1) { clearInterval(timer); timer = null; $('play').textContent = 'Play'; } else move(1); }, 900); } };
+fetch('/runtime-info').then(response => response.json()).then(info => {
+  $('runtime').textContent = `Live API origin: ${info.origin_backend} · policy: ${info.policy} · byte capacity: ${info.capacity_bytes.toLocaleString()} · objects: ${info.objects.length}`;
+}).catch(() => { $('runtime').textContent = 'Runtime information unavailable'; });
 </script>
 </body>
 </html>

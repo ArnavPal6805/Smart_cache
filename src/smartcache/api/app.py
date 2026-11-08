@@ -88,6 +88,36 @@ def create_app(
 
     app = FastAPI(title="SmartCache RL", lifespan=lifespan)
 
+    @app.get("/", response_class=HTMLResponse)
+    def home():
+        return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmartCache RL</title>
+<style>
+body {{ margin:0; background:#0e1624; color:#eef4ff; font:16px system-ui,sans-serif; }}
+main {{ max-width:900px; margin:auto; padding:42px 24px; }}
+.card {{ background:#172235; border:1px solid #2b3b55; border-radius:14px; padding:22px; margin:18px 0; }}
+a,button {{ color:#fff; background:#1d4f87; border:1px solid #3479c7; border-radius:8px; padding:10px 14px; text-decoration:none; margin:4px; display:inline-block; }}
+.muted {{ color:#9dafc8; }} code {{ color:#9bd1ff; }}
+</style></head><body><main>
+<h1>SmartCache RL</h1>
+<p class="muted">Cost-aware cache eviction with live API diagnostics.</p>
+<div class="card"><h2>Current runtime</h2>
+<p>Origin: <strong>{'SQLite' if use_sqlite else 'Demo simulator'}</strong></p>
+<p>Policy: <strong>{os.getenv("CACHE_POLICY", "dqn-byte")}</strong></p>
+<p>Cache: <strong>{settings["capacity_bytes"]:,} bytes</strong>, up to
+<strong>{settings["max_objects"]}</strong> objects</p></div>
+<div class="card"><h2>Open</h2>
+<a href="/explorer">Simulation Explorer</a>
+<a href="/docs">API documentation</a>
+<a href="/objects">Object catalog</a>
+<a href="/metrics">Live metrics</a></div>
+<div class="card"><h2>Try a request</h2>
+<p class="muted">Requesting the same object twice demonstrates MISS then HIT.</p>
+<code>curl -i /objects/aggregation</code>
+</div></main></body></html>"""
+
     @app.get("/health")
     def health():
         return {"status": "ok"}
@@ -95,6 +125,16 @@ def create_app(
     @app.get("/objects")
     def objects():
         return {"objects": sorted(effective_origin_specs)}
+
+    @app.get("/runtime-info")
+    def runtime_info():
+        return {
+            "origin_backend": "sqlite" if use_sqlite else "demo",
+            "policy": os.getenv("CACHE_POLICY", "dqn-byte"),
+            "capacity_bytes": settings["capacity_bytes"],
+            "max_objects": settings["max_objects"],
+            "objects": sorted(effective_origin_specs),
+        }
 
     @app.get("/objects/{key}")
     def get_object(key: str):

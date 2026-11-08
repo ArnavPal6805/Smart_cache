@@ -29,3 +29,19 @@ def test_first_request_misses_and_second_hits():
         assert second.status_code == 200
         assert second.headers["X-Cache"] == "HIT"
         assert load_calls == ["alpha"]
+
+
+def test_home_and_runtime_info_are_available():
+    app = create_app(
+        policy_factory=LRUPolicy,
+        origin_specs={"alpha": OriginSpec(2.0, 10, ord("A"))},
+        origin_loader=lambda key: b"A" * 10,
+        capacity_bytes=100,
+        max_objects=4,
+    )
+    with TestClient(app) as client:
+        assert client.get("/").status_code == 200
+        info = client.get("/runtime-info")
+        assert info.status_code == 200
+        assert info.json()["origin_backend"] == "demo"
+        assert info.json()["objects"] == ["alpha"]
