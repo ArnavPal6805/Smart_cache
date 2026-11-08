@@ -35,8 +35,13 @@ def create_app(
     recency_window: int | None = None,
     cost_scale_ms: float | None = None,
     size_scale_bytes: float | None = None,
+    origin_backend: str | None = None,
 ) -> FastAPI:
-    use_sqlite = os.getenv("ORIGIN_BACKEND", "demo").lower() == "sqlite"
+    use_sqlite = (
+        (origin_backend or os.getenv("ORIGIN_BACKEND", "demo")).lower() == "sqlite"
+        and origin_specs is ORIGIN_SPECS
+        and origin_loader is load_origin_payload
+    )
     sqlite_origin = (
         SQLiteOrigin(os.getenv("SQLITE_DATABASE", "data/origin.sqlite"))
         if use_sqlite

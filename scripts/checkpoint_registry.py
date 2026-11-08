@@ -82,7 +82,11 @@ def promote(source: Path, model_type: str) -> None:
         "version": version,
         "filename": source.name,
         "sha256": digest,
-        "path": str(destination.relative_to(ROOT)),
+        "path": (
+            str(destination.relative_to(ROOT))
+            if destination.is_relative_to(ROOT)
+            else str(destination)
+        ),
         "model_type": model_type,
         "checkpoint": checkpoint_info,
     }
