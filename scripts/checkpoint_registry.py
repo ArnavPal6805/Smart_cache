@@ -8,6 +8,7 @@ import shutil
 import time
 from pathlib import Path
 
+import numpy as np
 from smartcache.training.dqn_agent import DQNAgent
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,8 +51,17 @@ def validate_checkpoint(path: Path, model_type: str) -> dict:
 def write_manifest(value: dict) -> None:
     REGISTRY.mkdir(parents=True, exist_ok=True)
     temporary = MANIFEST.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    temporary.write_text(
+        json.dumps(value, indent=2, default=_json_default) + "\n",
+        encoding="utf-8",
+    )
     os.replace(temporary, MANIFEST)
+
+
+def _json_default(value: object) -> object:
+    if isinstance(value, np.generic):
+        return value.item()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def promote(source: Path, model_type: str) -> None:
