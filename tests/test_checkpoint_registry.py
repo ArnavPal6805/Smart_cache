@@ -1,6 +1,19 @@
 import json
+import importlib.util
+from pathlib import Path
 
-from scripts import checkpoint_registry
+
+def load_registry_module():
+    path = Path(__file__).parents[1] / "scripts" / "checkpoint_registry.py"
+    spec = importlib.util.spec_from_file_location("checkpoint_registry", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+checkpoint_registry = load_registry_module()
 
 
 def test_registry_promotes_and_rolls_back_checkpoints(tmp_path, monkeypatch):
