@@ -1,6 +1,10 @@
 .venv/
 .git/
-__pycache__/
+__pycache__
+.git
+.pytest_cache
+data
+configs/
 *.py[cod]
 .pytest_cache/
 artifacts/*.csv

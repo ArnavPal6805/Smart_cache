@@ -140,4 +140,11 @@ class ByteCacheRuntime:
 
     def snapshot_metrics(self) -> dict[str, Any]:
         with self.lock:
-            return {**self.metrics, "used_bytes": self.used_bytes, "objects": len(self.entries)}
+            return {
+                **self.metrics,
+                "used_bytes": self.used_bytes,
+                "objects": len(self.entries),
+                "policy_fallback_errors": int(
+                    getattr(self.policy, "fallback_errors", 0)
+                ),
+            }

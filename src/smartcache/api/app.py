@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Callable, Mapping
 
 from fastapi import FastAPI, HTTPException
@@ -14,7 +17,10 @@ from smartcache.policies.cost_aware import CostAwarePolicy
 from smartcache.policies.dqn_byte_policy import DQNBytePolicy
 from smartcache.policies.lfu import LFUPolicy
 from smartcache.policies.lru import LRUPolicy
+from smartcache.policies.safe_policy import SafePolicy
 from smartcache.runtime.cache_service import ByteCacheRuntime
+from smartcache.runtime.redis_cache_service import RedisByteCacheRuntime
+from smartcache.runtime.redis_store import RedisSharedCache
 from smartcache.api.simulation import build_simulation
 
 
@@ -52,38 +58,80 @@ def create_app(
         "cost_scale_ms": cost_scale_ms or 250.0,
         "size_scale_bytes": size_scale_bytes or 32768.0,
     }
+    cache_backend = os.getenv("CACHE_BACKEND", "memory").lower()
+    if cache_backend not in {"memory", "redis"}:
+        raise ValueError("CACHE_BACKEND must be memory or redis")
 
     def build_policy():
         if policy_factory is not None:
             return policy_factory()
         policy_name = os.getenv("CACHE_POLICY", "dqn-byte").lower()
         if policy_name == "lru":
-            return LRUPolicy()
+            return SafePolicy(LRUPolicy(), LRUPolicy())
         if policy_name == "lfu":
-            return LFUPolicy()
+            return SafePolicy(LFUPolicy(), LRUPolicy())
         if policy_name == "cost-aware":
-            return CostAwarePolicy()
+            return SafePolicy(CostAwarePolicy(), LRUPolicy())
         if policy_name == "dqn-byte":
-            return DQNBytePolicy(
-                checkpoint_path=os.getenv(
-                    "CACHE_CHECKPOINT", "artifacts/byte_dqn_best.pt"
-                ),
-                capacity_bytes=settings["capacity_bytes"],
-                max_objects=settings["max_objects"],
-                frequency_window=settings["frequency_window"],
-                recency_window=settings["recency_window"],
-                device=os.getenv("CACHE_DEVICE", "cpu"),
-            )
+            checkpoint = os.getenv("CACHE_CHECKPOINT")
+            if not checkpoint:
+                manifest_path = Path("artifacts/model_registry/active.json")
+                if manifest_path.is_file():
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    active = manifest.get("active", {}).get("byte")
+                    if active:
+                        checkpoint = active["path"]
+                        expected_hash = active["sha256"]
+                        actual_hash = hashlib.sha256(
+                            Path(checkpoint).read_bytes()
+                        ).hexdigest()
+                        if actual_hash != expected_hash:
+                            raise ValueError("Active byte checkpoint hash mismatch")
+            checkpoint = checkpoint or "artifacts/byte_dqn_best.pt"
+            try:
+                primary = DQNBytePolicy(
+                    checkpoint_path=checkpoint,
+                    capacity_bytes=settings["capacity_bytes"],
+                    max_objects=settings["max_objects"],
+                    frequency_window=settings["frequency_window"],
+                    recency_window=settings["recency_window"],
+                    device=os.getenv("CACHE_DEVICE", "cpu"),
+                )
+            except (FileNotFoundError, ValueError, RuntimeError):
+                fallback = os.getenv("CACHE_FALLBACK_POLICY")
+                if fallback == "lru":
+                    return SafePolicy(LRUPolicy(), LRUPolicy())
+                if fallback == "cost-aware":
+                    return SafePolicy(CostAwarePolicy(), LRUPolicy())
+                raise
+            return SafePolicy(primary, LRUPolicy())
         raise ValueError(f"Unknown CACHE_POLICY: {policy_name}")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.cache = ByteCacheRuntime(
-            policy=build_policy(),
-            origin_specs=effective_origin_specs,
-            origin_loader=effective_origin_loader,
-            **settings,
-        )
+        policy = build_policy()
+        if cache_backend == "redis":
+            store = RedisSharedCache(
+                url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
+                namespace=os.getenv("CACHE_REDIS_NAMESPACE", "smartcache:byte:v2"),
+                capacity_bytes=settings["capacity_bytes"],
+                max_objects=settings["max_objects"],
+            )
+            store.client.ping()
+            app.state.cache = RedisByteCacheRuntime(
+                client=store,
+                policy=policy,
+                origin_specs=effective_origin_specs,
+                origin_loader=effective_origin_loader,
+                **settings,
+            )
+        else:
+            app.state.cache = ByteCacheRuntime(
+                policy=policy,
+                origin_specs=effective_origin_specs,
+                origin_loader=effective_origin_loader,
+                **settings,
+            )
         yield
 
     app = FastAPI(title="SmartCache RL", lifespan=lifespan)
@@ -105,6 +153,7 @@ a,button {{ color:#fff; background:#1d4f87; border:1px solid #3479c7; border-rad
 <p class="muted">Cost-aware cache eviction with live API diagnostics.</p>
 <div class="card"><h2>Current runtime</h2>
 <p>Origin: <strong>{'SQLite' if use_sqlite else 'Demo simulator'}</strong></p>
+<p>Cache backend: <strong>{cache_backend}</strong></p>
 <p>Policy: <strong>{os.getenv("CACHE_POLICY", "dqn-byte")}</strong></p>
 <p>Cache: <strong>{settings["capacity_bytes"]:,} bytes</strong>, up to
 <strong>{settings["max_objects"]}</strong> objects</p></div>
@@ -161,6 +210,7 @@ Click an object to issue a real cache request.</p>
     def runtime_info():
         return {
             "origin_backend": "sqlite" if use_sqlite else "demo",
+            "cache_backend": cache_backend,
             "policy": os.getenv("CACHE_POLICY", "dqn-byte"),
             "capacity_bytes": settings["capacity_bytes"],
             "max_objects": settings["max_objects"],

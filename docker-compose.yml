@@ -1,0 +1,30 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: smartcache-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  api:
+    build: .
+    container_name: smartcache-api
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+    environment:
+      ORIGIN_BACKEND: sqlite
+      SQLITE_DATABASE: /data/origin.sqlite
+      ORIGIN_PROFILE: /config/sqlite_profile.json
+      CACHE_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
+      CACHE_REDIS_NAMESPACE: smartcache:byte:v2
+      CACHE_POLICY: dqn-byte
+      CACHE_CHECKPOINT: /models/byte_dqn_best.pt
+      CACHE_CAPACITY_BYTES: "24576"
+      CACHE_MAX_OBJECTS: "16"
+      CACHE_DEVICE: cpu
+    volumes:
+      - ./data:/data:ro
+      - ./configs:/config:ro

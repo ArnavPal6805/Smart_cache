@@ -6,3 +6,5 @@ __pycache__/
 .DS_Store
 data/
 configs/*.json
+artifacts/model_registry/
+artifacts/http_load*.json

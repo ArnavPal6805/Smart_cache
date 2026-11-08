@@ -36,13 +36,17 @@ Implemented:
 - Interactive simulation explorer
 - SQLite-backed origin with measured query latency and response sizes
 - Browser landing page, object catalog, and auto-refreshing live metrics page
+- Redis-backed shared cache storage with coordinated admission
+- HTTP load-test reporting p50/p95/p99 latency and throughput
+- Versioned checkpoint registry with SHA-256 promotion and rollback
 - Docker image definition
 
 The byte-aware DQN is a separate model from the fixed-slot DQN. Their state
 and action dimensions are different, so checkpoints must not be mixed.
 
-Not implemented yet: Redis shared storage, the history-aware `byte_cache_v3`
-model, HTTP load testing, and checkpoint promotion/rollback tooling.
+The existing byte-aware model remains `byte_cache_v2`. A history-aware
+`byte_cache_v3` model is intentionally not created without a separate training
+and evaluation run.
 
 ## Repository layout
 
@@ -68,7 +72,9 @@ smart-cache-rl/
 │   ├── benchmark_byte.py              # byte-capacity baseline benchmark
 │   ├── train_byte_dqn.py              # byte-aware DQN training
 │   ├── benchmark_byte_rl.py           # byte-aware DQN benchmark
-│   └── evaluate_byte_generalization.py # byte-aware multi-seed evaluation
+│   ├── evaluate_byte_generalization.py # byte-aware multi-seed evaluation
+│   ├── load_test_http.py              # concurrent HTTP latency benchmark
+│   └── checkpoint_registry.py         # checkpoint promotion/rollback
 ├── src/smartcache/
 │   ├── api/
 │   │   ├── app.py                     # FastAPI application
@@ -93,7 +99,9 @@ smart-cache-rl/
 │   │   ├── dqn_policy.py              # fixed-slot DQN adapter
 │   │   └── dqn_byte_policy.py         # byte-aware DQN adapter
 │   ├── runtime/
-│   │   └── cache_service.py           # thread-safe application cache
+│   │   ├── cache_service.py           # thread-safe in-memory cache
+│   │   ├── redis_store.py             # shared Redis payload/metadata store
+│   │   └── redis_cache_service.py     # Redis-backed cache runtime
 │   └── training/
 │       ├── dqn_agent.py               # Q-network, Double DQN, checkpoints
 │       └── replay_buffer.py           # masked transition replay
@@ -102,8 +110,10 @@ smart-cache-rl/
 │   ├── test_byte_cache.py
 │   ├── test_byte_cache_env.py
 │   ├── test_sqlite_origin.py
+│   ├── test_redis_store.py
 │   └── test_api.py
 ├── Dockerfile
+├── docker-compose.yml
 ├── .dockerignore
 └── pyproject.toml
 ```
@@ -138,7 +148,7 @@ python scripts/profile_sqlite_origin.py \
 The database contains deterministic synthetic products and purchases. The
 adapter executes real read-only SQL for metadata, user profiles, API rows,
 aggregations, embeddings, reports, and a search index. This is a local
-integration demonstration, not a production database benchmark.
+integration demonstrat[github.com/ArnavPal6805/Smart_cache](https://github.com/ArnavPal6805/Smart_cache)ion, not a production database benchmark.
 
 Use the SQLite origin with the API:
 
@@ -297,10 +307,10 @@ different experiments.
 The recorded fixed-slot generalization analysis reported these aggregate mean
 miss-cost reductions:
 
-| Workload | Compared with LRU | Compared with CostAware |
-|---|---:|---:|
-| Stationary | 36.9% | 36.6% |
-| Drifting | 40.3% | 15.9% |
+| Workload   | Compared with LRU | Compared with CostAware |
+| ---------- | ----------------: | ----------------------: |
+| Stationary |             36.9% |                   36.6% |
+| Drifting   |             40.3% |                   15.9% |
 
 These are descriptive aggregate comparisons, not proof of statistical
 significance. Use `analyze_generalization.py` to inspect paired bootstrap
@@ -311,11 +321,11 @@ significance. Use `analyze_generalization.py` to inspect paired bootstrap
 The recorded 5,000-request drifting benchmark used a 24,576-byte budget and
 reported:
 
-| Policy | Hit ratio | Miss cost (ms) | Evictions |
-|---|---:|---:|---:|
-| LRU | 0.599 | 223,117.0 | 1,391 |
-| LFU | 0.659 | 273,401.0 | 1,091 |
-| CostAware | 0.634 | 212,896.0 | 1,219 |
+| Policy    | Hit ratio | Miss cost (ms) | Evictions |
+| --------- | --------: | -------------: | --------: |
+| LRU       |     0.599 |      223,117.0 |     1,391 |
+| LFU       |     0.659 |      273,401.0 |     1,091 |
+| CostAware |     0.634 |      212,896.0 |     1,219 |
 
 CostAware had the lowest miss cost in this baseline run. The byte-aware DQN
 must be evaluated independently using `evaluate_byte_generalization.py`; its
@@ -418,6 +428,91 @@ curl http://127.0.0.1:8000/metrics
 
 The first repeated object request should be a miss and the second a hit. Then
 open `/metrics-ui` or call `/metrics` to see the updated counters.
+
+## Shared Redis cache
+
+Install the optional runtime dependencies and start Redis:
+
+```bash
+python -m pip install -e ".[dev]"
+docker run -d \
+  --name smartcache-redis \
+  --restart unless-stopped \
+  -p 127.0.0.1:6379:6379 \
+  redis:7-alpine
+docker exec smartcache-redis redis-cli ping
+```
+
+Run the API with coordinated shared admission:
+
+```bash
+export CACHE_BACKEND=redis
+export REDIS_URL=redis://127.0.0.1:6379/0
+export CACHE_REDIS_NAMESPACE=smartcache:byte:v2
+export CACHE_POLICY=dqn-byte
+export CACHE_CHECKPOINT=artifacts/byte_dqn_best.pt
+
+uvicorn smartcache.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Redis is a startup requirement when selected; the API does not silently
+pretend that a local cache is shared. The runtime performs a second lookup
+after acquiring the admission lock to avoid duplicate admissions.
+
+Run the reconciliation test:
+
+```bash
+REDIS_URL=redis://127.0.0.1:6379/15 pytest -q tests/test_redis_store.py
+```
+
+## HTTP load testing
+
+With the API running, measure real HTTP behavior:
+
+```bash
+python scripts/load_test_http.py \
+  --base-url http://127.0.0.1:8000 \
+  --requests 5000 \
+  --concurrency 20 \
+  --output artifacts/http_load.json
+```
+
+Repeat with concurrency `1`, `10`, `50`, and `100`. The report records
+completed responses, transport errors, error rate, throughput, p50, p95, p99,
+HTTP status counts, and cache result headers.
+
+## Checkpoint registry
+
+The registry keeps versioned checkpoint copies, SHA-256 hashes, and an atomic
+active manifest. Fixed-slot and byte-aware checkpoints remain separate:
+
+```bash
+python scripts/checkpoint_registry.py promote \
+  --source artifacts/dqn_best.pt \
+  --model-type fixed_slot
+python scripts/checkpoint_registry.py promote \
+  --source artifacts/byte_dqn_best.pt \
+  --model-type byte
+python scripts/checkpoint_registry.py status
+python scripts/checkpoint_registry.py rollback --model-type byte
+```
+
+When `CACHE_CHECKPOINT` is unset, the API uses and verifies the active byte
+registry entry when available. Set `CACHE_FALLBACK_POLICY=lru` or
+`cost-aware` for explicit startup fallback. Runtime fallback events appear as
+`policy_fallback_errors` in `/metrics`.
+
+## Docker Compose
+
+After creating `data/origin.sqlite` and `configs/sqlite_profile.json`:
+
+```bash
+docker compose up -d --build
+curl -f http://127.0.0.1:8000/health
+curl -i http://127.0.0.1:8000/objects/aggregation
+curl -i http://127.0.0.1:8000/objects/aggregation
+docker compose down
+```
 
 ## Docker
 
