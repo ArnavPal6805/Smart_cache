@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smart-cache-rl"
+version = "0.2.0"
+description = "Cost-aware reinforcement learning for cache eviction"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "torch",
+    "gymnasium",
+    "pandas",
+    "pyyaml",
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "httpx",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

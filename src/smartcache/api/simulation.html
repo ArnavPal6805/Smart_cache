@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmartCache Simulation Explorer</title>
+  <style>
+    :root { color-scheme: dark; --bg: #0e1624; --panel: #172235; --line: #2b3b55; --muted: #9dafc8; --good: #4ade80; --bad: #fb7185; --accent: #60a5fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: #eef4ff; font: 14px/1.45 system-ui, sans-serif; }
+    main { max-width: 1280px; margin: auto; padding: 28px; }
+    h1 { margin: 0 0 6px; } h2 { margin: 0 0 14px; font-size: 17px; }
+    .subtle, small { color: var(--muted); }
+    .controls, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 22px 0; }
+    label { display: grid; gap: 5px; color: var(--muted); }
+    input, select, button { border: 1px solid var(--line); border-radius: 7px; padding: 9px 11px; background: #101a2b; color: #eef4ff; }
+    button { cursor: pointer; background: #1d4f87; border-color: #3479c7; } button:disabled { opacity: .45; cursor: default; }
+    .grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; } .wide { grid-column: 1 / -1; }
+    .request { display: flex; gap: 18px; align-items: center; padding: 13px; border-radius: 9px; background: #101a2b; }
+    .badge { padding: 5px 9px; border-radius: 99px; font-weight: 700; } .hit { color: var(--good); background: #123b2b; } .miss { color: var(--bad); background: #4b1f2c; }
+    .cache { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; min-height: 47px; }
+    .slot { padding: 9px 12px; border: 1px solid var(--accent); border-radius: 8px; background: #163458; }
+    .empty { color: var(--muted); padding: 9px 0; }
+    .explanation { color: #c9dcf9; padding: 12px; background: #101a2b; border-left: 3px solid var(--accent); border-radius: 5px; }
+    table { width: 100%; border-collapse: collapse; } th, td { padding: 9px; text-align: left; border-bottom: 1px solid var(--line); } th { color: var(--muted); }
+    .winner { color: var(--good); font-weight: 700; } .timeline { max-height: 270px; overflow: auto; }
+    @media (max-width: 800px) { main { padding: 16px; } .grid { grid-template-columns: 1fr; } .wide { grid-column: auto; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>SmartCache Simulation Explorer</h1>
+  <div class="subtle">Replay the same request stream through every policy and inspect each hit, miss, eviction, reward, and cost.</div>
+  <div class="controls">
+    <label>Scenario<select id="scenario"><option value="stationary">Stationary</option><option value="drifting">Drifting</option></select></label>
+    <label>Seed<input id="seed" type="number" value="2026"></label>
+    <label>Requests<input id="count" type="number" min="1" max="200" value="30"></label>
+    <label>Capacity (slots)<input id="capacity" type="number" min="1" value="3"></label>
+    <button id="load">Generate simulation</button>
+    <button id="prev" disabled>Previous</button>
+    <button id="next" disabled>Next request</button>
+    <button id="play" disabled>Play</button>
+  </div>
+  <div class="grid">
+    <section class="panel"><h2>Current request</h2><div id="request" class="subtle">Generate a simulation to begin.</div><h2 style="margin-top:20px">Policy decision</h2><div id="explanation" class="explanation">No request selected.</div><h2 style="margin-top:20px">Cache after decision</h2><div id="cache" class="cache"><span class="empty">No cache state yet.</span></div></section>
+    <section class="panel"><h2>Policy comparison for this request</h2><div id="comparison" class="subtle">No simulation loaded.</div></section>
+    <section class="panel wide"><h2>Cumulative comparison</h2><div id="summary" class="subtle">No simulation loaded.</div></section>
+    <section class="panel wide"><h2>Request timeline</h2><div id="timeline" class="timeline subtle">No simulation loaded.</div></section>
+  </div>
+</main>
+<script>
+let data = null, index = 0, timer = null;
+const $ = id => document.getElementById(id);
+function esc(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function load() {
+  const q = new URLSearchParams({scenario: $('scenario').value, seed: $('seed').value, requests: $('count').value, capacity: $('capacity').value});
+  $('load').disabled = true;
+  try { const response = await fetch('/simulation?' + q); if (!response.ok) throw new Error(await response.text()); data = await response.json(); index = 0; $('prev').disabled = false; $('next').disabled = false; $('play').disabled = false; render(); }
+  catch (error) { alert(error.message); } finally { $('load').disabled = false; }
+}
+function currentRows() { return data.policies.map(p => ({policy: p.policy, step: p.steps[index]})); }
+function render() {
+  const rows = currentRows(), reference = rows[0].step, req = reference.request;
+  $('request').innerHTML = `<strong>Request ${index + 1} / ${data.requests.length}: ${esc(req.key)}</strong><span>${req.cost} ms retrieval cost</span><span>${req.size} bytes</span>`;
+  const dqn = rows.find(r => r.policy === 'DQN');
+  const focus = dqn || rows[0];
+  $('explanation').innerHTML = `<span class="badge ${focus.step.result === 'HIT' ? 'hit' : 'miss'}">${focus.step.result}</span> ${esc(focus.step.explanation)}<br><small>Reward: ${focus.step.reward.toFixed(1)} | Policy time: ${focus.step.policy_time_ms.toFixed(3)} ms</small>`;
+  $('cache').innerHTML = focus.step.after_cache.length ? focus.step.after_cache.map((key, i) => `<span class="slot">Slot ${i}: ${esc(key)}</span>`).join('') : '<span class="empty">Cache is empty</span>';
+  $('comparison').innerHTML = `<table><tr><th>Policy</th><th>Result</th><th>Evicted</th><th>Reward</th><th>Cache after</th></tr>${rows.map(r => `<tr><td>${esc(r.policy)}</td><td class="${r.step.result === 'HIT' ? 'winner' : ''}">${r.step.result}</td><td>${esc(r.step.evicted || '—')}</td><td>${r.step.reward.toFixed(1)}</td><td>${r.step.after_cache.map(esc).join(', ') || '—'}</td></tr>`).join('')}</table>`;
+  $('summary').innerHTML = `<table><tr><th>Policy</th><th>Hit ratio</th><th>Miss cost</th><th>Policy overhead</th><th>Net cost</th></tr>${data.policies.map(p => `<tr><td>${esc(p.policy)}</td><td>${(p.summary.hit_ratio * 100).toFixed(1)}%</td><td>${p.steps[index].cumulative_miss_cost_ms.toFixed(1)} ms</td><td>${p.summary.policy_time_ms.toFixed(3)} ms</td><td>${p.summary.net_cost_ms.toFixed(1)} ms</td></tr>`).join('')}</table>`;
+  $('timeline').innerHTML = rows.map(r => `<div style="padding:5px 0"><strong>${esc(r.policy)}</strong> · ${r.step.result} · ${esc(r.step.request.key)} ${r.step.evicted ? '· evicted ' + esc(r.step.evicted) : ''}</div>`).join('');
+}
+function move(delta) { if (!data) return; index = Math.max(0, Math.min(data.requests.length - 1, index + delta)); render(); }
+$('load').onclick = load; $('prev').onclick = () => move(-1); $('next').onclick = () => move(1);
+$('play').onclick = () => { if (timer) { clearInterval(timer); timer = null; $('play').textContent = 'Play'; } else { $('play').textContent = 'Pause'; timer = setInterval(() => { if (index >= data.requests.length - 1) { clearInterval(timer); timer = null; $('play').textContent = 'Play'; } else move(1); }, 900); } };
+</script>
+</body>
+</html>
