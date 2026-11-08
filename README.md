@@ -34,10 +34,15 @@ Implemented:
 - Thread-safe runtime cache service
 - FastAPI HTTP application
 - Interactive simulation explorer
+- SQLite-backed origin with measured query latency and response sizes
+- Browser landing page, object catalog, and auto-refreshing live metrics page
 - Docker image definition
 
 The byte-aware DQN is a separate model from the fixed-slot DQN. Their state
 and action dimensions are different, so checkpoints must not be mixed.
+
+Not implemented yet: Redis shared storage, the history-aware `byte_cache_v3`
+model, HTTP load testing, and checkpoint promotion/rollback tooling.
 
 ## Repository layout
 
@@ -96,6 +101,7 @@ smart-cache-rl/
 │   ├── test_cache_simulator.py
 │   ├── test_byte_cache.py
 │   ├── test_byte_cache_env.py
+│   ├── test_sqlite_origin.py
 │   └── test_api.py
 ├── Dockerfile
 ├── .dockerignore
@@ -149,6 +155,13 @@ uvicorn smartcache.api.app:app \
 
 The profile supplies the DQN/cache cost and size estimates while every miss
 still measures the actual SQLite load duration.
+
+Generated local files are ignored by Git:
+
+```text
+data/origin.sqlite
+configs/sqlite_profile.json
+```
 
 ## Run the tests and smoke checks
 
@@ -323,14 +336,24 @@ The FastAPI service was exercised successfully:
 
 ## FastAPI service
 
-Start the application locally:
+### SQLite-backed application
+
+Create the database and profile first:
 
 ```bash
-export CACHE_POLICY=dqn-byte
-export CACHE_CHECKPOINT=artifacts/byte_dqn_best.pt
-export CACHE_CAPACITY_BYTES=24576
-export CACHE_MAX_OBJECTS=16
-export CACHE_DEVICE=cpu
+python scripts/init_demo_db.py
+python scripts/profile_sqlite_origin.py \
+    --database data/origin.sqlite \
+    --repeats 15
+```
+
+Then start the application:
+
+```bash
+export ORIGIN_BACKEND=sqlite
+export SQLITE_DATABASE="$PWD/data/origin.sqlite"
+export ORIGIN_PROFILE="$PWD/configs/sqlite_profile.json"
+export CACHE_POLICY=lru
 
 uvicorn smartcache.api.app:app \
     --host 127.0.0.1 \
@@ -340,24 +363,42 @@ uvicorn smartcache.api.app:app \
 Available endpoints:
 
 ```text
+GET /
 GET /health
 GET /objects
 GET /objects/{key}
 GET /metrics
+GET /runtime-info
+GET /catalog
+GET /metrics-ui
 GET /simulation
 GET /explorer
 GET /docs
 ```
 
-The interactive Simulation Explorer is available at:
+Browser pages:
 
 ```text
+http://127.0.0.1:8000/
+http://127.0.0.1:8000/catalog
+http://127.0.0.1:8000/metrics-ui
 http://127.0.0.1:8000/explorer
 ```
 
-It replays one identical request trace through LRU, LFU, CostAware, and the
-compatible fixed-slot DQN checkpoint. It shows each request's hit/miss result,
-cache contents, evicted object, reward, policy overhead, and cumulative cost.
+The home page shows the active origin, policy, and cache capacity. The catalog
+shows each cacheable object with profiled retrieval cost and response size;
+clicking an object issues a real request through the cache. The metrics page
+refreshes every second.
+
+`/objects` and `/metrics` remain JSON APIs for scripts and monitoring. Live
+metrics count only requests to `/objects/{key}`; opening UI pages does not
+generate cache traffic. Metrics reset when the server restarts.
+
+The Simulation Explorer replays one identical request trace through LRU, LFU,
+CostAware, and the compatible fixed-slot DQN checkpoint. It shows each
+request's hit/miss result, cache contents, evicted object, reward, policy
+overhead, and cumulative cost. This replay is separate from the live API cache
+and does not change `/metrics`.
 
 The byte-aware DQN has a different observation/action space and should be
 evaluated with the byte-capacity scripts rather than loaded into the fixed-slot
@@ -366,14 +407,17 @@ explorer.
 Useful API checks:
 
 ```bash
+curl http://127.0.0.1:8000/
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/objects
+curl http://127.0.0.1:8000/runtime-info
 curl -i http://127.0.0.1:8000/objects/aggregation
 curl -i http://127.0.0.1:8000/objects/aggregation
 curl http://127.0.0.1:8000/metrics
 ```
 
-The first repeated object request should be a miss and the second a hit.
+The first repeated object request should be a miss and the second a hit. Then
+open `/metrics-ui` or call `/metrics` to see the updated counters.
 
 ## Docker
 
@@ -419,8 +463,8 @@ The strongest evidence comes from:
 
 ## Limitations and next steps
 
-- The demonstration origin backend uses simulated latency, not a real database
--  or production service unless `ORIGIN_BACKEND=sqlite` is selected.
+- The default demonstration origin uses simulated latency; select
+  `ORIGIN_BACKEND=sqlite` for the real local SQL path.
 - The SQLite origin is a deterministic local workload and is not evidence of
   production database performance.
 - The state representation is a compact summary and does not contain the full
