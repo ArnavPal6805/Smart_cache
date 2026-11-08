@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import statistics
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,18 @@ def bootstrap_ci(values, rng, samples=20_000):
         float(np.quantile(bootstrap_means, 0.025)),
         float(np.quantile(bootstrap_means, 0.975)),
     )
+
+
+def paired_report(values, rng):
+    mean_value, lower, upper = bootstrap_ci(values, rng)
+    return {
+        "mean": mean_value,
+        "std": float(statistics.stdev(values)) if len(values) > 1 else 0.0,
+        "ci95_low": lower,
+        "ci95_high": upper,
+        "wins": sum(value > 0 for value in values),
+        "win_rate": 100.0 * sum(value > 0 for value in values) / len(values),
+    }
 
 
 def main() -> None:
@@ -82,8 +95,13 @@ def main() -> None:
                         "policy": policy.name,
                         "total_miss_cost_ms": result["total_miss_cost_ms"],
                         "net_cost_ms": result["estimated_net_cost_ms"],
+                        "policy_time_ms": result["policy_time_ms"],
                         "hit_ratio": result["hit_ratio"],
                         "evictions": result["evictions"],
+                        "peak_bytes": result["peak_bytes"],
+                        "byte_budget_violations": int(
+                            result["peak_bytes"] > args.capacity_bytes
+                        ),
                     }
                 )
 
@@ -99,6 +117,7 @@ def main() -> None:
         print(f"{scenario.capitalize()} workloads")
         for baseline in ("LRU", "LFU", "CostAware"):
             reductions = []
+            net_reductions = []
             for seed in range(args.seed_start, args.seed_start + args.seed_count):
                 values = {
                     row["policy"]: float(row["total_miss_cost_ms"])
@@ -108,10 +127,28 @@ def main() -> None:
                 reductions.append(
                     100.0 * (values[baseline] - values["DQN-Byte"]) / values[baseline]
                 )
-            mean_value, lower, upper = bootstrap_ci(reductions, rng)
+                net_values = {
+                    row["policy"]: float(row["net_cost_ms"])
+                    for row in rows
+                    if row["scenario"] == scenario and row["seed"] == seed
+                }
+                net_reductions.append(
+                    100.0
+                    * (net_values[baseline] - net_values["DQN-Byte"])
+                    / net_values[baseline]
+                )
+            report = paired_report(reductions, rng)
+            net_report = paired_report(net_reductions, rng)
             print(
                 f"  DQN-Byte vs {baseline}: "
-                f"{mean_value:.2f}% (95% CI {lower:.2f}% to {upper:.2f}%)"
+                f"miss cost {report['mean']:.2f}% "
+                f"(std {report['std']:.2f}, 95% CI "
+                f"{report['ci95_low']:.2f}% to {report['ci95_high']:.2f}%, "
+                f"wins {report['wins']}/{args.seed_count}); "
+                f"net cost {net_report['mean']:.2f}% "
+                f"(std {net_report['std']:.2f}, 95% CI "
+                f"{net_report['ci95_low']:.2f}% to {net_report['ci95_high']:.2f}%, "
+                f"wins {net_report['wins']}/{args.seed_count})"
             )
     print(f"Saved results to {output}")
 

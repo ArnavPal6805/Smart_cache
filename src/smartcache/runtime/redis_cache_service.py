@@ -58,9 +58,16 @@ class RedisByteCacheRuntime:
         spec = self.origin_specs[key]
         payload = self.store.get(key)
         if payload is not None:
-            self.store.touch(key, self.position)
+            with self.store.transaction_lock():
+                payload = self.store.get(key)
+                if payload is not None:
+                    self.store.touch(key, self.position)
+            if payload is None:
+                return self.get(key)
             self.metrics["hits"] += 1
-            return RedisCacheResult(payload, True, 0.0, 0.0, 0.0, (), self.store.stats()["used_bytes"], False)
+            return RedisCacheResult(
+                payload, True, 0.0, 0.0, 0.0, (), self.store.stats()["used_bytes"], False
+            )
 
         started = perf_counter_ns()
         loaded = self.origin_loader(key)
@@ -132,9 +139,11 @@ class RedisByteCacheRuntime:
             return RedisCacheResult(loaded, False, spec.retrieval_cost_ms, backend_ms, policy_ms, tuple(evicted), self.store.stats()["used_bytes"], False)
 
     def snapshot_metrics(self) -> dict[str, Any]:
+        storage = self.store.stats()
         return {
             **self.metrics,
-            **self.store.stats(),
+            **storage,
+            "objects": storage["object_count"],
             "policy_fallback_errors": int(
                 getattr(self.policy, "fallback_errors", 0)
             ),

@@ -111,6 +111,8 @@ smart-cache-rl/
 │   ├── test_byte_cache_env.py
 │   ├── test_sqlite_origin.py
 │   ├── test_redis_store.py
+│   ├── test_checkpoint_registry.py
+│   ├── test_safe_policy.py
 │   └── test_api.py
 ├── Dockerfile
 ├── docker-compose.yml
@@ -295,6 +297,24 @@ python scripts/evaluate_byte_generalization.py \
     --seed-start 20000 \
     --seed-count 10
 ```
+
+For an independent 30-seed report, use a seed range not used for training or
+checkpoint selection:
+
+```bash
+python scripts/evaluate_byte_generalization.py \
+    --checkpoint artifacts/byte_dqn_best.pt \
+    --capacity-bytes 24576 \
+    --max-objects 16 \
+    --requests 5000 \
+    --seed-start 30000 \
+    --seed-count 30 \
+    --output artifacts/byte_generalization_test_results.csv
+```
+
+The evaluator reports mean and standard deviation, paired bootstrap 95%
+confidence intervals, per-seed win counts for miss cost and net cost, policy
+overhead, hit ratio, evictions, peak bytes, and budget-violation flags.
 
 Do not compare absolute miss costs from the fixed-slot and byte-capacity
 benchmarks directly. They use different constraints and therefore represent

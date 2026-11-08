@@ -47,3 +47,20 @@ def test_home_and_runtime_info_are_available():
         assert info.json()["objects"] == ["alpha"]
         assert client.get("/catalog").status_code == 200
         assert client.get("/metrics-ui").status_code == 200
+
+
+def test_origin_failure_is_returned_and_not_cached():
+    specs = {"broken": OriginSpec(2.0, 10, ord("B"))}
+    app = create_app(
+        policy_factory=LRUPolicy,
+        origin_specs=specs,
+        origin_loader=lambda key: (_ for _ in ()).throw(
+            OSError("origin unavailable")
+        ),
+        capacity_bytes=100,
+        max_objects=4,
+    )
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/objects/broken")
+        assert response.status_code == 500
+        assert app.state.cache.snapshot_metrics()["objects"] == 0

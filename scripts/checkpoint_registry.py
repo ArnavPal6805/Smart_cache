@@ -87,7 +87,7 @@ def promote(source: Path, model_type: str) -> None:
         "checkpoint": checkpoint_info,
     }
     write_manifest(manifest)
-    print(json.dumps(manifest["active"][model_type], indent=2))
+    print(json.dumps(manifest["active"][model_type], indent=2, default=_json_default))
 
 
 def rollback(model_type: str) -> None:
@@ -102,7 +102,7 @@ def rollback(model_type: str) -> None:
     manifest["active"][model_type] = previous
     manifest["history"] = candidates
     write_manifest(manifest)
-    print(json.dumps(previous, indent=2))
+    print(json.dumps(previous, indent=2, default=_json_default))
 
 
 def main() -> None:
@@ -120,7 +120,7 @@ def main() -> None:
     elif args.command == "rollback":
         rollback(args.model_type)
     else:
-        print(json.dumps(read_manifest(), indent=2))
+        print(json.dumps(read_manifest(), indent=2, default=_json_default))
 
 
 if __name__ == "__main__":

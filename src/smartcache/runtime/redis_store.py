@@ -72,6 +72,8 @@ class RedisSharedCache:
         size = len(payload)
         if size > self.capacity_bytes:
             return
+        if self.metadata(key) is not None:
+            self.remove(key)
         for victim in evicted_keys:
             self.remove(victim)
         metadata = {
@@ -116,12 +118,13 @@ class RedisSharedCache:
             orphaned = 0
             for key in self.keys():
                 metadata = self.metadata(key)
-                if metadata is None or self.get(key) is None:
+                payload = self.get(key)
+                if metadata is None or payload is None:
                     self.client.hdel(self.meta_key, key)
                     self.client.delete(self._payload_key(key))
                     orphaned += 1
                     continue
-                used += len(self.get(key) or b"")
+                used += len(payload)
             self.client.set(self.bytes_key, used)
             return {
                 "used_bytes": used,
