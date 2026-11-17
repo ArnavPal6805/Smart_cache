@@ -255,7 +255,7 @@ main { max-width:1000px; margin:auto; padding:32px 20px; }
 a { color:#9bd1ff; } .muted { color:#9dafc8; }
 </style></head><body><main>
 <p><a href="/">Home</a> · <a href="/catalog">Object catalog</a> · <a href="/explorer">Explorer</a></p>
-<h1>Live metrics</h1><p class="muted">Refreshes every 1 second. JSON API: <a href="/metrics">/metrics</a></p>
+<h1>Live metrics</h1><p class="muted">Refreshes every 1 second. Counts only requests to <code>/objects/{key}</code>; simulation replays and page loads are not included. JSON API: <a href="/metrics">/metrics</a></p>
 <div id="status" class="muted">Loading...</div><div id="metrics" class="grid"></div>
 <script>
 const fields = [
@@ -286,7 +286,12 @@ refresh(); setInterval(refresh, 1000);
         requests: int = 30,
         capacity: int = 3,
     ):
-        checkpoint = os.getenv("CACHE_CHECKPOINT", "artifacts/byte_dqn_best.pt")
+        # The explorer replays the fixed-slot model. The live runtime uses the
+        # byte-aware model, whose state/action dimensions are incompatible with
+        # this slot-based simulation.
+        checkpoint = os.getenv(
+            "CACHE_SIMULATION_CHECKPOINT", "artifacts/dqn_best.pt"
+        )
         try:
             return build_simulation(
                 scenario=scenario,

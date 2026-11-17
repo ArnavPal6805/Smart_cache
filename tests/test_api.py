@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from smartcache.api.app import create_app
 from smartcache.api.demo_origin import OriginSpec
+from smartcache.api.simulation import build_simulation
 from smartcache.policies.lru import LRUPolicy
 
 
@@ -86,3 +87,20 @@ def test_invalid_checkpoint_uses_explicit_fallback(monkeypatch):
 
     assert response.status_code == 200
     assert app.state.cache.policy.name == "LRU"
+
+
+def test_simulation_uses_fixed_slot_dqn_checkpoint():
+    result = build_simulation(
+        scenario="stationary",
+        seed=2026,
+        requests_count=5,
+        capacity=3,
+        checkpoint="artifacts/dqn_best.pt",
+    )
+
+    assert [policy["policy"] for policy in result["policies"]] == [
+        "LRU",
+        "LFU",
+        "CostAware",
+        "DQN",
+    ]
